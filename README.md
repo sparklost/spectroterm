@@ -100,5 +100,5 @@ Nuitka requirements:
 
 
 ## Screenshots
-![spectroterm screenshot 01](https://raw.githubusercontent.com/mzivic7/spectroterm/refs/heads/main/.github/screenshots/01.png)
-![spectroterm screenshot 02](https://raw.githubusercontent.com/mzivic7/spectroterm/refs/heads/main/.github/screenshots/02.png)
+![spectroterm screenshot 01](https://raw.githubusercontent.com/sparklost/spectroterm/refs/heads/main/.github/screenshots/01.png)
+![spectroterm screenshot 02](https://raw.githubusercontent.com/sparklost/spectroterm/refs/heads/main/.github/screenshots/02.png)
