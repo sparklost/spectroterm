@@ -217,6 +217,10 @@ def main(screen, args):
     curses.start_color()
     curses.use_default_colors()
 
+    # prevent mouse icon changing when running in tmux
+    curses.mousemask(curses.ALL_MOUSE_EVENTS)
+    curses.mouseinterval(0)
+
     # load config
     color = args.color
     box = args.box
@@ -506,7 +510,7 @@ def argparser():
         "-v",
         "--version",
         action="version",
-        version="%(prog)s 0.5.3",
+        version="%(prog)s 0.5.4",
     )
     return parser.parse_args()
 

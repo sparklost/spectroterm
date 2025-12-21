@@ -103,4 +103,4 @@ Nuitka requirements:
 ![spectroterm screenshot 01](https://raw.githubusercontent.com/sparklost/spectroterm/refs/heads/main/.github/screenshots/01.png)
 Spectroterm running in tmux:  
 ![spectroterm screenshot 02](https://raw.githubusercontent.com/sparklost/spectroterm/refs/heads/main/.github/screenshots/02.png)  
-(Command: `spectroterm -pc -r ┃ --min-db=-70 --max-db=-20 --sample-size 70`)
+(Command: `spectroterm -pc -r ┃ --min-db=-70 --max-db=-20`)
