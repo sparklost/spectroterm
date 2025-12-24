@@ -1,4 +1,5 @@
-# cython: boundscheck=False
+# cython: boundscheck=False, wraparound=False
+import curses
 import numpy as np
 cimport numpy as np
 from libc.math cimport log10, sqrt, fabs
@@ -60,54 +61,44 @@ cpdef np.ndarray log_band_volumes(
     return np.maximum(db, -90.0)
 
 
-def generate_spectrum(
-    list left_lines,
-    list right_lines,
+cpdef int get_color(int y, int bar_height, bint use_color):
+    """Get color id by bar height"""
+    if not use_color:
+        return curses.color_pair(0)
+    cdef float relative = (bar_height - y) / bar_height
+    if relative < 0.5:
+        return curses.color_pair(1)
+    if relative < 0.8:
+        return curses.color_pair(2)
+    return curses.color_pair(3)
+
+
+cpdef void draw_spectrum(
+    object spectrum_win,
     np.ndarray[np.int32_t, ndim=1] bar_heights,
     np.ndarray[np.int32_t, ndim=1] peak_heights,
     int bar_height,
     str bar_character,
     str peak_character,
     bint peaks,
-    bint box,
-    bint axes,
-    colors
+    bint color,
+    bint box
 ):
     """Draw spectrum bars with peaks"""
-    cdef list lines = []
+    cdef int y, x, bar, peak, i
     cdef int width = bar_heights.shape[0]
-    cdef int y_raw, y, i
-    cdef double relative
-    cdef int color
     cdef list line
 
-    if box:
-        lines.append(left_lines[0])
-    for y_raw in range(bar_height - box):
-        y = y_raw + box
+    for y in range(bar_height - box):
         line = [" "] * width
-
         for i in range(width):
-            if y_raw >= bar_height - bar_heights[i]:
+            bar = bar_heights[i]
+            if y >= bar_height - bar:
                 line[i] = bar_character
-            if peaks and y_raw == bar_height - peak_heights[i]:
-                line[i] = peak_character
-
-        if colors is not None:
-            relative = (bar_height - y_raw) / bar_height
-            if relative < 0.5:
-                color = colors[0]
-            elif relative < 0.8:
-                color = colors[1]
-            else:
-                color = colors[2]
-            lines.append(left_lines[y] + f"\x1b[38;5;{color}m" + "".join(line) + "\x1b[0m" + right_lines[y_raw])
-        else:
-            lines.append(left_lines[y] + "".join(line) + right_lines[y_raw])
-
-    if axes:
-        lines.append(left_lines[-2] + right_lines[-1])
-    if box:
-        lines.append(left_lines[-1])
-
-    return lines
+        if peaks:
+            for x in range(width):
+                peak = peak_heights[x]
+                if y == bar_height - peak:
+                    line[x] = peak_character
+        spectrum_win.insstr(y, 0, "".join(line), get_color(y, bar_height, color))
+        spectrum_win.refresh()

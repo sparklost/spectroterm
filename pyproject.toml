@@ -1,6 +1,6 @@
 [project]
 name = "spectroterm"
-version = "0.5.4"
+version = "0.6.0"
 description = "Curses based terminal spectrum analyzer for currently playing audio."
 readme = "README.md"
 requires-python = ">=3.12"

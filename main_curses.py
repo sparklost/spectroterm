@@ -1,4 +1,5 @@
 import argparse
+import curses
 import importlib.util
 import shutil
 import signal
@@ -11,9 +12,6 @@ import numpy as np
 import soundcard as sc
 from pyfftw.interfaces.numpy_fft import rfft
 
-import tui
-
-pw_loopback = None
 
 def log_band_volumes(data, freqs, num_bands, band_edges, max_ref):
     """Get logarythmic volume in dB for specified number of bands, from sound sample, with interpolation between bands"""
@@ -56,6 +54,41 @@ def log_band_volumes(data, freqs, num_bands, band_edges, max_ref):
     # magnitude to negative dB
     db = 20 * np.log10(magnitude / max_ref + 1e-12)    # add small value to avoid log(0)
     return np.maximum(db, -90)
+
+
+def get_color(y, bar_height, use_color):
+    """Get color id by bar height"""
+    if not use_color:
+        return curses.color_pair(0)
+    relative = (bar_height - y) / bar_height
+    if relative < 0.5:
+        return curses.color_pair(1)   # green
+    if relative < 0.8:
+        return curses.color_pair(2)   # yellow
+    return curses.color_pair(3)   # red
+
+
+def draw_spectrum(spectrum_win, bar_heights, peak_heights, bar_height, bar_character, peak_character, peaks, color, box):
+    """Draw spectrum bars with peaks"""
+    width = bar_heights.shape[0]
+    for y in range(bar_height - box):
+        line = [" "] * width
+        for i in range(width):
+            bar = bar_heights[i]
+            if y >= bar_height - bar:
+                line[i] = bar_character
+            if peaks and y == bar_height - peak_heights[i]:
+                line[i] = peak_character
+        spectrum_win.insstr(y, 0, "".join(line), get_color(y, bar_height, color))
+        spectrum_win.refresh()
+
+
+# use cython if available
+if importlib.util.find_spec("spectrum_curses_cython"):
+    from spectrum_cython import draw_spectrum, log_band_volumes
+
+
+pw_loopback = None
 
 
 def connect_pipewire(output_node_name, target_node_name=None, only_get_name=False):
@@ -124,9 +157,8 @@ def db_to_height(db, min_db, max_db, bar_height):
     return np.clip(np.round(np.interp(db, (min_db, max_db), (0, bar_height))).astype(np.int32), 0, bar_height)
 
 
-def generate_log_x_axis(lines, num_bars, min_freq, max_freq):
+def draw_log_x_axis(screen, num_bars, x, h, min_freq, max_freq, have_box=True):
     """Draw logarythmic Hz x axis"""
-    line = [" "] * num_bars
     freqs = [30, 100, 200, 500, 1000, 2000, 5000, 10000, 16000]
     band_edges = np.logspace(np.log10(min_freq), np.log10(max_freq), num_bars + 1)
     for freq in freqs:
@@ -138,103 +170,56 @@ def generate_log_x_axis(lines, num_bars, min_freq, max_freq):
                 else:
                     label = str(round(freq))
                 if pos < num_bars - 5:
-                    for i, ch in enumerate(label):
-                        line[pos + i] = ch
-    line = "".join(line[:-2]) + "Hz"
-    lines[-1] += line
-    return lines
+                    screen.addstr(h - 1 - have_box, x + pos, label)
+        screen.addstr(h - 1 - have_box, x + num_bars - 3 + have_box * 2, "Hz")
 
 
-def generate_log_y_axis(lines, bar_height, min_db, max_db):
+def draw_log_y_axis(screen, bar_height, min_db, max_db, have_box=True):
     """Draw logarythmic dB y axis"""
     levels = list(range(int(min_db), int(max_db) + 1, 10))
-    added = []
-    label_len = 0
     for db in levels:
         # get y coordinate
         pos = int(np.interp(db, (min_db, max_db), (bar_height, 0)))
         label = str(db).rjust(3)
-        if 0 < pos < bar_height:
-            lines[pos] += label
-            added.append(pos)
-            label_len = len(label)
-    for num, line in enumerate(lines):
-        if num not in added and num != 0:
-            lines[num] += label_len * " "
-    lines[0] += " dB"
-    return lines
+        if 0 <= pos < bar_height:
+            screen.addstr(have_box + pos, have_box, label)
+    screen.addstr(have_box, have_box + 1, "dB")
 
 
-def generate_ui(draw_box, draw_axes, min_freq, max_freq, min_db, max_db, h, w):
+def draw_ui(screen, draw_box, draw_axes, min_freq, max_freq, min_db, max_db):
     """Draw UI"""
-    bar_height = h - draw_box - draw_axes
-    num_bars = w - 2 * draw_box - 3 * draw_axes
+    h, w = screen.getmaxyx()
+    screen.clear()
+    spectrum_hwyx = (
+        h - draw_box - draw_axes,
+        w - 2 * draw_box - 4 * draw_axes,
+        draw_box,
+        draw_box + 4 * draw_axes,
+    )
+    spectrum_win = screen.derwin(*spectrum_hwyx)
+    bar_height, num_bars = spectrum_win.getmaxyx()
     if draw_box:
-        top_line = "┌─Spectrum Analyzer" + "─" * (w - 20) + "┐"
-        bot_line = "└" + "─" * (w - 2) + "┘"
-        left_lines = ["│"] * (h - 2)
-        right_lines = ["│"] * (h - 2)
-    else:
-        top_line = ""
-        bot_line = ""
-        left_lines = [""] * h
-        right_lines = [""] * h
+        screen.box()
+        screen.addstr(0, 2, "Spectrum Analyzer")
     if draw_axes:
-        left_lines = generate_log_y_axis(left_lines, bar_height, min_db, max_db)
-        left_lines = generate_log_x_axis(left_lines, num_bars, min_freq, max_freq)
-    left_lines = [top_line] + left_lines + [bot_line]
-    return left_lines, right_lines, bar_height, num_bars
+        draw_log_y_axis(screen, bar_height, min_db, max_db, draw_box)
+        draw_log_x_axis(screen, num_bars, 4, h, min_freq, max_freq, draw_box)
+    return spectrum_win
 
 
-def generate_spectrum(left_lines, right_lines, bar_heights, peak_heights, bar_height, bar_character, peak_character, peaks, box, axes, colors):
-    """Draw spectrum bars with peaks"""
-    lines = []
-    if box:
-        lines.append(left_lines[0])
-
-    width = bar_heights.shape[0]
-    for y_raw in range(bar_height - box):
-        y = y_raw + box
-        line = [" "] * width
-
-        for i in range(width):
-            bar = bar_heights[i]
-            if y_raw >= bar_height - bar:
-                line[i] = bar_character
-            if peaks and y_raw == bar_height - peak_heights[i]:
-                line[i] = peak_character
-
-        if colors:
-            relative = (bar_height - y_raw) / bar_height
-            if relative < 0.5:
-                color = colors[0]
-            elif relative < 0.8:
-                color = colors[1]
-            else:
-                color = colors[2]
-            lines.append(left_lines[y] + f"\x1b[38;5;{color}m" + "".join(line) + "\x1b[0m" + right_lines[y_raw])
-        else:
-            lines.append(left_lines[y] + "".join(line) + right_lines[y_raw])
-
-    if axes:
-        lines.append(left_lines[-2] + right_lines[-1])
-    if box:
-        lines.append(left_lines[-1])
-    return lines
-
-
-# use cython if available
-if importlib.util.find_spec("spectrum_cython"):
-    from spectrum_cython import generate_spectrum, log_band_volumes
-
-
-def main(args):
+def main(screen, args):
     """Main app function"""
+    curses.curs_set(0)
+    screen.nodelay(True)
+    curses.start_color()
+    curses.use_default_colors()
+
+    # prevent mouse icon changing when running in tmux
+    curses.mousemask(curses.ALL_MOUSE_EVENTS)
+    curses.mouseinterval(0)
+
     # load config
-    if args.color:
-        colors = (args.green, args.orange,args.red)
-    else:
-        colors = None
+    color = args.color
     box = args.box
     axes = args.axes
     peaks = args.peaks
@@ -252,6 +237,12 @@ def main(args):
     pipewire_fix = args.pipewire_fix
     pipewire_node_id = args.pipewire_node_id
     delay = args.delay
+
+    curses.init_pair(0, -1, -1)
+    if color:
+        curses.init_pair(1, args.green, -1)
+        curses.init_pair(2, args.orange, -1)
+        curses.init_pair(3, args.red, -1)
 
     # detect bluetooth device
     if args.bt_delay:
@@ -276,10 +267,9 @@ def main(args):
 
     try:
         with loopback_mic.recorder(samplerate=sample_rate, channels=1, blocksize=numframes) as rec:
-            if tui.resized:
-                h, w = tui.get_size()
-                tui.resized = False
-            left_lines, right_lines, bar_height, num_bars = generate_ui(box, axes, min_freq, max_freq, min_db, max_db, h, w)
+            h, w = screen.getmaxyx()
+            spectrum_win = draw_ui(screen, box, axes, min_freq, max_freq, min_db, max_db)
+            bar_height, num_bars = spectrum_win.getmaxyx()
             band_edges = np.logspace(np.log10(min_freq), np.log10(max_freq), num_bars + 1)
             silence = np.repeat(-90.0, num_bars)
             silence_time = 0
@@ -291,13 +281,13 @@ def main(args):
 
             while True:
                 # handle input
-                # key = tui.read_key()
-                # if key == 113:
-                #     break
-                if tui.resized:
-                    h, w = tui.get_size()
-                    tui.resized = False
-                    left_lines, right_lines, bar_height, num_bars = generate_ui(box, axes, min_freq, max_freq, min_db, max_db, h, w)
+                key = screen.getch()
+                if key == 113:
+                    break
+                elif key == curses.KEY_RESIZE:
+                    h, w = screen.getmaxyx()
+                    spectrum_win = draw_ui(screen, box, axes, min_freq, max_freq, min_db, max_db)
+                    bar_height, num_bars = spectrum_win.getmaxyx()
                     band_edges = np.logspace(np.log10(min_freq), np.log10(max_freq), num_bars + 1)
                     silence = np.repeat(-90, num_bars)
 
@@ -316,7 +306,6 @@ def main(args):
                         continue
                     silence_time += int(args.sample_size)
                     db = silence
-
                 # calculate heights on screen
                 raw_bar_heights = db_to_height(db, min_db, max_db, bar_height)
 
@@ -349,16 +338,20 @@ def main(args):
                             peak_times[i] = now
 
                 # draw spectrum
-                lines = generate_spectrum(left_lines, right_lines, bar_heights, peak_heights, bar_height, bar_character, peak_character, peaks, box, axes, colors)
-                tui.draw(lines)
+                try:
+                    draw_spectrum(spectrum_win, bar_heights, peak_heights, bar_height, bar_character, peak_character, peaks, color, box)
+                except curses.error:
+                    h, w = screen.getmaxyx()
+                    spectrum_win = draw_ui(screen, box, axes, min_freq, max_freq, min_db, max_db)
+                    bar_height, num_bars = spectrum_win.getmaxyx()
+                    band_edges = np.logspace(np.log10(min_freq), np.log10(max_freq), num_bars + 1)
+                    silence = np.repeat(-90, num_bars)
 
-    except Exception:
+    except Exception as e:
         if pw_loopback:
             pw_loopback.send_signal(signal.SIGINT)
             pw_loopback.wait()
-        tui.leave_raw()
-        import traceback
-        sys.exit(f"Error: {traceback.format_exc()}")
+        sys.exit(f"Error: {e}")
 
 
 def sigint_handler(signum, frame):   # noqa
@@ -366,7 +359,6 @@ def sigint_handler(signum, frame):   # noqa
     if pw_loopback:
         pw_loopback.send_signal(signal.SIGINT)
         pw_loopback.wait()
-    tui.leave_raw()
     sys.exit(0)
 
 
@@ -534,11 +526,4 @@ if __name__ == "__main__":
         for node in last_nodes:
             print(node)
         sys.exit()
-    tui.enter_raw()
-    try:
-        main(args)
-    except Exception:
-        tui.leave_raw()
-        import traceback
-        sys.exit(f"Error: {traceback.format_exc()}")
-    tui.leave_raw()
+    curses.wrapper(main, args)
