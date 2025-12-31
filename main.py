@@ -341,8 +341,8 @@ def main(args):
                         peak_heights = bar_heights.copy()
                         peak_times = [now] * len(bar_heights)
                     for i, bh in enumerate(bar_heights):
-                        if bh > peak_heights[i]:
-                            peak_heights[i] = bh
+                        if bh >= peak_heights[i] - 1:
+                            peak_heights[i] = bh + 1
                             peak_times[i] = now
                         elif now - peak_times[i] > peak_hold:
                             peak_heights[i] = bh
@@ -521,7 +521,7 @@ def argparser():
         "-v",
         "--version",
         action="version",
-        version="%(prog)s 0.6.0",
+        version="%(prog)s 0.6.1",
     )
     return parser.parse_args()
 
