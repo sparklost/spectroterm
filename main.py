@@ -494,7 +494,7 @@ def argparser():
         "-r",
         "--bar-character",
         type=str,
-        default="┃",
+        default="█",
         help="character used to draw bars",
     )
     parser.add_argument(
