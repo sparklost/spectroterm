@@ -10,7 +10,6 @@ jobs:
     name: build (${{ matrix.os }}, ${{ matrix.python-version }}${{ matrix.clang && format(', {0}', matrix.clang-version) || '' }})
     strategy:
       matrix:
-        clang-version: [20.1.4]
         os: [ubuntu-latest, windows-latest, macos-15]
         include:
           - os: ubuntu-latest
@@ -18,16 +17,19 @@ jobs:
             python-version: 3.13
             nuitka: true
             clang: true
+            clang-version: 21.1.8
           - os: windows-latest
             platform: windows
             python-version: 3.12   # https://github.com/Nuitka/Nuitka/issues/3234
             nuitka: true
             clang: false   # https://github.com/Nuitka/Nuitka/issues/3370
+            clang-version: 21.1.8
           - os: macos-15
             platform: macos
             python-version: 3.13
             nuitka: false
             clang: true
+            clang-version: 21.1.8
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -53,7 +55,7 @@ jobs:
         run: echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> $GITHUB_ENV
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v7
         with:
           version: "0.7.14"
           enable-cache: false

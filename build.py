@@ -81,8 +81,9 @@ def patch_soundcard():
     Search for soundcard/pulseaudio.py in .venv
     replace assert with proper exception
     """
+    fprint("Patching soundcard")
     if not os.path.exists(".venv"):
-        fprint(".venv dir not found")
+        print(".venv dir not found")
         return
 
     # patch mediafoundation.py
@@ -105,9 +106,9 @@ def patch_soundcard():
     if changed:
         with open(path, "w", encoding="utf-8") as f:
             f.writelines(lines)
-        fprint(f"Patched file: {path}")
+        print(f"Patched file: {path}")
     else:
-        fprint(f"Nothing to patch in file {path}")
+        print(f"Nothing to patch in file {path}")
 
     # patch pulseaudio.py
     path = find_file_in_venv("soundcard", "pulseaudio.py")
@@ -130,9 +131,9 @@ def patch_soundcard():
     if changed:
         with open(path, "w", encoding="utf-8") as f:
             f.writelines(lines)
-        fprint(f"Patched file: {path}")
+        print(f"Patched file: {path}")
     else:
-        fprint(f"Nothing to patch in file {path}")
+        print(f"Nothing to patch in file {path}")
 
 
 def build_numpy_lite(clang):
@@ -191,7 +192,7 @@ def build_cython(clang, mingw):
     )
     for line in process.stdout:
         line_clean = line.rstrip("\n")
-        if len(line_clean) < 100 and "Cythonizing" not in line_clean and "Compiling" not in line_clean and "creating" not in line_clean:
+        if len(line_clean) < 100 and not any(s in line_clean for s in ("Cythonizing", "Compiling", "creating", "  warn(")):
             print(line_clean)
     process.wait()
     if process.returncode != 0:

@@ -1,11 +1,13 @@
 import argparse
 import importlib.util
+import math
 import shutil
 import signal
 import subprocess
 import sys
 import time
 from collections import deque
+from functools import lru_cache
 
 import numpy as np
 import soundcard as sc
@@ -124,10 +126,84 @@ def db_to_height(db, min_db, max_db, bar_height):
     return np.clip(np.round(np.interp(db, (min_db, max_db), (0, bar_height))).astype(np.int32), 0, bar_height)
 
 
+def round_step(raw_step):
+    """Round value to 10/5/2/1 steps"""
+    if raw_step <= 0:
+        return 1
+    exponent = 10 ** math.floor(math.log10(raw_step))
+    fraction = raw_step / exponent
+    if fraction <= 1:
+        step = 1
+    elif fraction <= 2:
+        step = 2
+    elif fraction <= 5:
+        step = 5
+    else:
+        step = 10
+    return step * exponent
+
+
+@lru_cache(maxsize=10)
+def generate_lin_levels(min_val, max_val, max_space):
+    """Generate linear levels for graph axis"""
+    max_values = max(1, (max_space + 1) // (2))
+    target_count = min(max(3, max_values), max_space)
+
+    def calculate_levels(step):
+        start = math.floor(min_val / step) * step
+        end = math.ceil(max_val / step) * step
+        levels = []
+        value = start
+        while value <= end + step * 0.5:
+            levels.append(value)
+            value += step
+        return levels
+
+    step = round_step((max_val - min_val) / max(1, target_count - 1))
+    levels = calculate_levels(step)
+    while len(levels) > max_values:
+        step = round_step(step * 1.5)
+        levels = calculate_levels(step)
+    return tuple(levels)
+
+
+@lru_cache(maxsize=10)
+def generate_log_levels(min_val, max_val, max_space, bases=(1, 2, 5)):
+    """Generate logarithmic levels for graph axis"""
+    usable = max(1, (max_space + 1) // (2))
+    min_exp = math.floor(math.log10(min_val))
+    max_exp = math.ceil(math.log10(max_val))
+
+    def calculate_levels(bases):
+        levels = []
+        for exp in range(min_exp, max_exp + 1):
+            decade = 10 ** exp
+            for base in bases:
+                value = base * decade
+                if min_val <= value <= max_val:
+                    levels.append(value)
+        if min_val not in levels:   # lower endpoints
+            levels.insert(0, min_val)
+        if max_val not in levels:   # upper endpoint
+            levels.append(max_val)
+        return sorted(set(levels))
+
+    levels = calculate_levels(bases)
+    while len(levels) > usable:
+        if 2 in bases:
+            bases = tuple(b for b in bases if b != 2)
+        elif 5 in bases:
+            bases = tuple(b for b in bases if b != 5)
+        else:
+            break
+        levels = calculate_levels(bases)
+    return tuple(levels)
+
+
 def generate_log_x_axis(lines, num_bars, min_freq, max_freq):
     """Draw logarythmic Hz x axis"""
     line = [" "] * num_bars
-    freqs = [30, 100, 200, 500, 1000, 2000, 5000, 10000, 16000]
+    freqs = generate_log_levels(min_freq, max_freq, num_bars)
     band_edges = np.logspace(np.log10(min_freq), np.log10(max_freq), num_bars + 1)
     for freq in freqs:
         if band_edges[0] < freq < band_edges[-1]:
@@ -147,7 +223,7 @@ def generate_log_x_axis(lines, num_bars, min_freq, max_freq):
 
 def generate_log_y_axis(lines, bar_height, min_db, max_db):
     """Draw logarythmic dB y axis"""
-    levels = list(range(int(min_db), int(max_db) + 1, 10))
+    levels = generate_lin_levels(min_db, max_db, bar_height)
     added = []
     label_len = 0
     for db in levels:
@@ -307,8 +383,7 @@ def main(args):
                     data = buffer.popleft()
                 else:
                     data = rec.record(numframes=numframes).flatten()
-                # skip calculations if all data is zero
-                if data.any():
+                if data.any():   # skip calculations if all data is zero
                     db = log_band_volumes(data, freqs, num_bars, band_edges, reference_max)
                     silence_time = 0
                 else:
@@ -419,7 +494,7 @@ def argparser():
         "-r",
         "--bar-character",
         type=str,
-        default="█",
+        default="┃",
         help="character used to draw bars",
     )
     parser.add_argument(
