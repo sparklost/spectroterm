@@ -182,7 +182,7 @@ def generate_log_levels(min_val, max_val, max_space, bases=(1, 2, 5)):
                 value = base * decade
                 if min_val <= value <= max_val:
                     levels.append(value)
-        if min_val not in levels:   # lower endpoints
+        if min_val not in levels:   # lower endpoint
             levels.insert(0, min_val)
         if max_val not in levels:   # upper endpoint
             levels.append(max_val)
@@ -199,14 +199,14 @@ def generate_log_levels(min_val, max_val, max_space, bases=(1, 2, 5)):
         levels = calculate_levels(bases)
     return tuple(levels)
 
-
-def generate_log_x_axis(lines, num_bars, min_freq, max_freq):
+@lru_cache(maxsize=10)
+def generate_log_x_axis(num_bars, min_freq, max_freq):
     """Draw logarythmic Hz x axis"""
     line = [" "] * num_bars
     freqs = generate_log_levels(min_freq, max_freq, num_bars)
-    band_edges = np.logspace(np.log10(min_freq), np.log10(max_freq), num_bars + 1)
+    band_edges = np.round(np.logspace(np.log10(min_freq), np.log10(max_freq), num_bars + 1)).astype(int)
     for freq in freqs:
-        if band_edges[0] < freq < band_edges[-1]:
+        if band_edges[0] <= freq <= band_edges[-1]:
             pos = np.argmin(np.abs(band_edges - freq))
             if 0 <= pos < num_bars:
                 if freq >= 1000:
@@ -216,9 +216,7 @@ def generate_log_x_axis(lines, num_bars, min_freq, max_freq):
                 if pos < num_bars - 5:
                     for i, ch in enumerate(label):
                         line[pos + i] = ch
-    line = "".join(line[:-2]) + "Hz"
-    lines[-1] += line
-    return lines
+    return "".join(line[:-2]) + "Hz"
 
 
 def generate_log_y_axis(lines, bar_height, min_db, max_db):
@@ -257,7 +255,7 @@ def generate_ui(draw_box, draw_axes, min_freq, max_freq, min_db, max_db, h, w):
         right_lines = [""] * h
     if draw_axes:
         left_lines = generate_log_y_axis(left_lines, bar_height, min_db, max_db)
-        left_lines = generate_log_x_axis(left_lines, num_bars, min_freq, max_freq)
+        left_lines[-1] += generate_log_x_axis(num_bars, min_freq, max_freq)
     left_lines = [top_line] + left_lines + [bot_line]
     return left_lines, right_lines, bar_height, num_bars
 
