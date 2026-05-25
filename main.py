@@ -77,11 +77,15 @@ def connect_pipewire(output_node_name, target_node_name=None, only_get_name=Fals
     global pw_loopback
     # check if pipewire is running
     if "pipewire" not in subprocess.check_output(["ps", "-A"], text=True):
-        sys.exit("Pipewire process not found")
+        tui.leave_raw()
+        print("Pipewire process not found")
+        sys.exit(1)
 
     # check if pipewire commands are available
     if not (shutil.which("pw-link") or shutil.which("pw-loopback")):
-        sys.exit("pw-link and pw-loopback commands not found")
+        tui.leave_raw()
+        print("pw-link and pw-loopback commands not found")
+        sys.exit(1)
 
     if target_node_name and ":" in target_node_name:
         target_node_name = target_node_name.split(":")[0]
@@ -104,7 +108,9 @@ def connect_pipewire(output_node_name, target_node_name=None, only_get_name=Fals
             if node_name not in last_nodes:
                 last_nodes.append(node_name)
     if not last_nodes:
-        sys.exit("Could not find active pipewire links. Make sure audio is playing when starting spectroterm or specify custom node name.")
+        tui.leave_raw()
+        print("Could not find active pipewire links. Make sure audio is playing when starting spectroterm or specify custom node name.")
+        sys.exit(1)
 
     if only_get_name:
         return last_nodes
@@ -530,7 +536,9 @@ def main(args):
             pw_loopback.wait()
         tui.leave_raw()
         import traceback
-        sys.exit(f"Error: {traceback.format_exc()}")
+        tui.leave_raw()
+        print(f"Error: {traceback.format_exc()}")
+        sys.exit(1)
 
 
 def sigint_handler(signum, frame):   # noqa
@@ -729,12 +737,13 @@ if __name__ == "__main__":
         last_nodes = connect_pipewire(sc.default_speaker().id, only_get_name=True)
         for node in last_nodes:
             print(node)
-        sys.exit()
+        sys.exit(0)
     tui.enter_raw()
     try:
         main(args)
     except Exception:
         tui.leave_raw()
         import traceback
-        sys.exit(f"Error: {traceback.format_exc()}")
+        print(f"Error: {traceback.format_exc()}")
+        sys.exit(1)
     tui.leave_raw()
