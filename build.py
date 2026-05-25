@@ -6,6 +6,8 @@ import subprocess
 import sys
 import tomllib
 
+PYTHON_MAX_MINOR = 13
+
 
 def get_app_name():
     """Get app name from pyproject.toml"""
@@ -14,10 +16,10 @@ def get_app_name():
             data = tomllib.load(f)
         if "project" in data and "version" in data["project"]:
             return str(data["project"]["name"])
-        print("App name not specified in pyproject.toml")
-        sys.exit()
-    print("pyproject.toml file not found")
-    sys.exit()
+        print("App name not specified in pyproject.toml", file=sys.stderr)
+        sys.exit(1)
+    print("pyproject.toml file not found", file=sys.stderr)
+    sys.exit(1)
 
 
 def get_version_number():
@@ -27,10 +29,34 @@ def get_version_number():
             data = tomllib.load(f)
         if "project" in data and "version" in data["project"]:
             return str(data["project"]["version"])
-        print("Version not specified in pyproject.toml")
-        sys.exit()
-    print("pyproject.toml file not found")
-    sys.exit()
+        print("Version not specified in pyproject.toml", file=sys.stderr)
+        sys.exit(1)
+    print("pyproject.toml file not found", file=sys.stderr)
+    sys.exit(1)
+
+
+def is_gil_enabled():
+    """Safely check if GIL is enabled"""
+    try:
+        return sys._is_gil_enabled()
+    except AttributeError:
+        return True
+
+
+def get_python_version():
+    """Get python major and minor versions"""
+    if shutil.which("uv"):
+        try:
+            version_result = subprocess.run(["uv", "run", "--no-sync", "python", "-VV"], capture_output=True, text=True, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"uv error: {e}", file=sys.stderr)
+            return sys.version_info.major, sys.version_info.minor, is_gil_enabled()
+        all_parts = version_result.stdout.strip().split(" ")
+        version_parts = all_parts[1].split(".")
+        if len(version_parts) < 2:
+            return sys.version_info.major, sys.version_info.minor, is_gil_enabled()
+        return int(version_parts[0]), int(version_parts[1]), "free-threading" in all_parts[2]
+    return sys.version_info.major, sys.version_info.minor, is_gil_enabled()
 
 
 def supports_color():
@@ -57,6 +83,53 @@ def fprint(text, color_code="\033[1;35m", prepend=f"[{PKGNAME.capitalize()} Buil
         print(f"{color_code}{prepend}{text}\033[0m")
     else:
         print(f"{prepend}{text}")
+
+
+def check_python():
+    """Check python version and print warning, and return True if runing inside pure python (no uv)"""
+    if sys.version_info.major != 3:
+        print(f"Python {sys.version_info.major} is not supported. Only Python 3 is supported.", file=sys.stderr)
+        sys.exit(1)
+
+    if os.environ.get("UV", ""):
+        if sys.version_info.minor < 12 or sys.version_info.minor > PYTHON_MAX_MINOR:
+            fprint(f'WARNING: Python {sys.version_info.major}.{sys.version_info.minor} is not supported but build may succeed. Run "python build.py" to let uv download and setup recommended temporary python interpreter.', color_code="\033[1;31m")
+        else:
+            try:
+                version = subprocess.run(["uv", "--version"], capture_output=True, text=True, check=True)
+                fprint(f"Using {version.stdout.strip()}")
+            except Exception:
+                pass
+            fprint(f"Using Python {sys.version}")
+        if not is_gil_enabled():
+            fprint("WARNING: Freethreaded build may fail or built binary may crash.", color_code="\033[1;31m")
+        return False
+
+    try:
+        version = subprocess.run(["uv", "--version"], capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"uv error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except FileNotFoundError:
+        print("uv command not found, please ensure uv is installed and in PATH", file=sys.stderr)
+        sys.exit(1)
+    return True
+
+
+def ensure_python():
+    """Check current python and download correct python if needed"""
+    _, minor, _ = get_python_version()
+    if minor == PYTHON_MAX_MINOR:
+        return None
+
+    version = f"3.{PYTHON_MAX_MINOR}"
+    # ensure there is no same-name freethreaded python
+    subprocess.run(["uv", "python", "uninstall", f"3.{minor}+freethreaded"], check=False)
+
+    fprint(f"Setting up python {version} for this project")
+    subprocess.run(["uv", "python", "install", version], check=True)
+
+    return version
 
 
 def find_file_in_venv(lib_name, file_name):
@@ -357,6 +430,15 @@ if __name__ == "__main__":
     args = parser()
     if sys.platform not in ("linux", "win32", "darwin"):
         sys.exit(f"This platform is not supported: {sys.platform}")
+
+    if check_python():
+        version = ensure_python()
+        if version:
+            os.execvp("uv", ["uv", "run", "-p", version, *sys.argv])
+        else:
+            os.execvp("uv", ["uv", "run", *sys.argv])
+        sys.exit(0)
+
     if not args.nocython:
         try:
             build_cython(args.clang, args.mingw)

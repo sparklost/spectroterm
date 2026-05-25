@@ -17,8 +17,17 @@ import tui
 
 pw_loopback = None
 
-def log_band_volumes(data, freqs, num_bands, band_edges, max_ref):
-    """Get logarythmic volume in dB for specified number of bands, from sound sample, with interpolation between bands"""
+def log_band_volumes(data, freqs, num_bands, band_edges, max_ref, window=0, discrete=True):
+    """Get logarythmic volume in dB for specified number of bands, from sound sample, with energy interpolation between bands"""
+    # apply window function
+    if window == 0:
+        pass
+    elif window == 1:
+        np.multiply(data, np.hamming(len(data)), out=data)
+    elif window == 2:
+        np.multiply(data, np.hanning(len(data)), out=data)
+    elif window == 3:
+        np.multiply(data, np.blackman(len(data)), out=data)
     # get magnitude from fft
     raw_magnitude = np.abs(rfft(data, threads=1))
 
@@ -52,6 +61,9 @@ def log_band_volumes(data, freqs, num_bands, band_edges, max_ref):
             weights = np.array(weights)
             weights /= np.sum(weights)
             magnitude[i] = np.sqrt(np.sum((raw_magnitude[bins]**2) * weights))   # weighted RMS
+        elif discrete:
+            band_center = (left + right) / 2
+            magnitude[i] = raw_magnitude[np.argmin(np.abs(freqs - band_center))]
         else:
             magnitude[i] = np.sqrt(np.mean(raw_magnitude[idx]**2))   # RMS
 
@@ -168,9 +180,11 @@ def generate_lin_levels(min_val, max_val, max_space):
 
 
 @lru_cache(maxsize=10)
-def generate_log_levels(min_val, max_val, max_space, bases=(1, 2, 5)):
+def generate_log_levels(min_val, max_val, max_space, bases=(1, 2, 5, 7, 3, 1.5)):
     """Generate logarithmic levels for graph axis"""
-    usable = max(1, (max_space + 1) // (2))
+    spacing = max(int(max_space / 20), 4)
+    usable = max(1, (max_space + spacing) // (1 + spacing))
+    bases_init = bases[:]
     min_exp = math.floor(math.log10(min_val))
     max_exp = math.ceil(math.log10(max_val))
 
@@ -181,7 +195,7 @@ def generate_log_levels(min_val, max_val, max_space, bases=(1, 2, 5)):
             for base in bases:
                 value = base * decade
                 if min_val <= value <= max_val:
-                    levels.append(value)
+                    levels.append(int(value))
         if min_val not in levels:   # lower endpoint
             levels.insert(0, min_val)
         if max_val not in levels:   # upper endpoint
@@ -190,24 +204,51 @@ def generate_log_levels(min_val, max_val, max_space, bases=(1, 2, 5)):
 
     levels = calculate_levels(bases)
     while len(levels) > usable:
-        if 2 in bases:
-            bases = tuple(b for b in bases if b != 2)
-        elif 5 in bases:
-            bases = tuple(b for b in bases if b != 5)
+        for base_init in reversed(bases_init):
+            if base_init in bases and base_init != 1:
+                bases = tuple(b for b in bases if b != base_init)
+                break
         else:
             break
         levels = calculate_levels(bases)
     return tuple(levels)
 
+
 @lru_cache(maxsize=10)
-def generate_log_x_axis(num_bars, min_freq, max_freq):
+def generate_log_levels_even(min_val, max_val, max_space):
+    """Generate evenly spaced logarithmic levels for graph axis"""
+    spacing = max(int(max_space / 20), 4)
+    usable = max(1, (max_space + spacing) // (1 + spacing))
+    steps_per_decade = max(1, round(usable / math.log10(max_val) - math.log10(min_val)))
+    start = math.ceil(math.log10(min_val) * steps_per_decade)
+    end = math.floor(math.log10(max_val) * steps_per_decade)
+    levels = []
+    for i in range(start, end + 1):
+        value = 10 ** (i / steps_per_decade)
+        levels.append(int(value))
+    if min_val not in levels:   # lower endpoint
+        levels.insert(0, min_val)
+    if max_val not in levels:   # upper endpoint
+        levels.append(max_val)
+    return tuple(levels)
+
+
+@lru_cache(maxsize=10)
+def generate_log_x_axis(num_bars, min_freq, max_freq, even_spacing=False):
     """Draw logarythmic Hz x axis"""
     line = [" "] * num_bars
-    freqs = generate_log_levels(min_freq, max_freq, num_bars)
+    if even_spacing:
+        freqs = generate_log_levels_even(min_freq, max_freq, num_bars)
+    else:
+        freqs = generate_log_levels(min_freq, max_freq, num_bars)
     band_edges = np.round(np.logspace(np.log10(min_freq), np.log10(max_freq), num_bars + 1)).astype(int)
     for freq in freqs:
         if band_edges[0] <= freq <= band_edges[-1]:
             pos = np.argmin(np.abs(band_edges - freq))
+            if pos >= num_bars - 5:
+                continue
+            if line[pos] != " " or (pos and line[pos - 1] != " "):
+                continue
             if 0 <= pos < num_bars:
                 if freq >= 1000:
                     label = f"{round(freq/1000)}k"
@@ -239,7 +280,7 @@ def generate_log_y_axis(lines, bar_height, min_db, max_db):
     return lines
 
 
-def generate_ui(draw_box, draw_axes, min_freq, max_freq, min_db, max_db, h, w):
+def generate_ui(draw_box, draw_axes, min_freq, max_freq, min_db, max_db, h, w, even_x):
     """Draw UI"""
     bar_height = h - draw_box - draw_axes
     num_bars = w - 2 * draw_box - 3 * draw_axes
@@ -255,12 +296,12 @@ def generate_ui(draw_box, draw_axes, min_freq, max_freq, min_db, max_db, h, w):
         right_lines = [""] * h
     if draw_axes:
         left_lines = generate_log_y_axis(left_lines, bar_height, min_db, max_db)
-        left_lines[-1] += generate_log_x_axis(num_bars, min_freq, max_freq)
+        left_lines[-1] += generate_log_x_axis(num_bars, min_freq, max_freq, even_x)
     left_lines = [top_line] + left_lines + [bot_line]
     return left_lines, right_lines, bar_height, num_bars
 
 
-def generate_spectrum(left_lines, right_lines, bar_heights, peak_heights, bar_height, bar_character, peak_character, peaks, box, axes, colors):
+def generate_spectrum(left_lines, right_lines, bar_heights, peak_heights, bar_height, bar_char, half_bar_char, peak_character, peaks, box, axes, colors):   # noqa
     """Draw spectrum bars with peaks"""
     lines = []
     if box:
@@ -274,7 +315,7 @@ def generate_spectrum(left_lines, right_lines, bar_heights, peak_heights, bar_he
         for i in range(width):
             bar = bar_heights[i]
             if y_raw >= bar_height - bar:
-                line[i] = bar_character
+                line[i] = bar_char
             if peaks and y_raw == bar_height - peak_heights[i]:
                 line[i] = peak_character
 
@@ -297,9 +338,54 @@ def generate_spectrum(left_lines, right_lines, bar_heights, peak_heights, bar_he
     return lines
 
 
+def generate_spectrum_half(left_lines, right_lines, bar_heights, peak_heights, bar_height, bar_char, half_bar_char, peak_char, peaks, box, axes, colors):
+    """Draw spectrum bars with half characters and with peaks"""
+    lines = []
+    if box:
+        lines.append(left_lines[0])
+    bar_height = int(bar_height/2)
+
+    width = bar_heights.shape[0]
+    for y_raw in range(bar_height - box):
+        y = y_raw + box
+        line = [" "] * width
+
+        for i in range(width):
+            height = bar_heights[i]
+            top_full_start = bar_height - height // 2
+            if y_raw >= top_full_start:
+                line[i] = bar_char
+            elif height & 1 and y_raw == top_full_start - 1:
+                line[i] = half_bar_char
+            if peaks and y_raw == bar_height - (peak_heights[i] // 2) - 1:
+                line[i] = peak_char
+
+        if colors:
+            relative = (bar_height - y_raw) / bar_height
+            if relative < 0.5:
+                color = colors[0]
+            elif relative < 0.8:
+                color = colors[1]
+            else:
+                color = colors[2]
+            lines.append(left_lines[y] + f"\x1b[38;5;{color}m" + "".join(line) + "\x1b[0m" + right_lines[y_raw])
+        else:
+            lines.append(left_lines[y] + "".join(line) + right_lines[y_raw])
+
+    if axes:
+        lines.append(left_lines[-2] + right_lines[-1])
+    if box:
+        lines.append(left_lines[-1])
+    return lines
+
+
 # use cython if available
 if importlib.util.find_spec("spectrum_cython"):
-    from spectrum_cython import generate_spectrum, log_band_volumes
+    from spectrum_cython import (
+        generate_spectrum,
+        generate_spectrum_half,
+        log_band_volumes,
+    )
 
 
 def main(args):
@@ -313,8 +399,9 @@ def main(args):
     axes = args.axes
     peaks = args.peaks
     fall_speed = args.fall_speed
-    bar_character = args.bar_character[0]
-    peak_character = args.peak_character[0]
+    bar_char = args.bar_character[0]
+    half_bar_char = args.half_bar_character[0] if args.half_bar_character and args.half_bar_character.lower() != "none" else ""
+    peak_char = args.peak_character[0]
     sample_rate = args.sample_rate
     sample_size = args.sample_size / 1000
     reference_max = args.reference_max
@@ -326,6 +413,14 @@ def main(args):
     pipewire_fix = args.pipewire_fix
     pipewire_node_id = args.pipewire_node_id
     delay = args.delay
+    discrete = args.discrete
+    window = 1 if args.window == "hamming" else 2 if args.window == "hann" else 3 if args.window == "blackman" else 0
+    even_x = args.even_x_axis
+
+    if half_bar_char:
+        generate_spectrum_selected = generate_spectrum_half
+    else:
+        generate_spectrum_selected = generate_spectrum
 
     # detect bluetooth device
     if args.bt_delay:
@@ -353,11 +448,13 @@ def main(args):
             if tui.resized:
                 h, w = tui.get_size()
                 tui.resized = False
-            left_lines, right_lines, bar_height, num_bars = generate_ui(box, axes, min_freq, max_freq, min_db, max_db, h, w)
+            left_lines, right_lines, bar_height, num_bars = generate_ui(box, axes, min_freq, max_freq, min_db, max_db, h, w, even_x)
+            if half_bar_char:
+                bar_height *= 2
             band_edges = np.logspace(np.log10(min_freq), np.log10(max_freq), num_bars + 1)
             silence = np.repeat(-90.0, num_bars)
             silence_time = 0
-            max_silence_time = max(peak_hold, h/fall_speed) * 2 * 1000
+            max_silence_time = max(peak_hold, h/fall_speed*(bool(half_bar_char)+1)) * 2 * 1000
 
             if delay:
                 buffer = deque()
@@ -371,7 +468,9 @@ def main(args):
                 if tui.resized:
                     h, w = tui.get_size()
                     tui.resized = False
-                    left_lines, right_lines, bar_height, num_bars = generate_ui(box, axes, min_freq, max_freq, min_db, max_db, h, w)
+                    left_lines, right_lines, bar_height, num_bars = generate_ui(box, axes, min_freq, max_freq, min_db, max_db, h, w, even_x)
+                    if half_bar_char:
+                        bar_height *= 2
                     band_edges = np.logspace(np.log10(min_freq), np.log10(max_freq), num_bars + 1)
                     silence = np.repeat(-90, num_bars)
 
@@ -382,7 +481,7 @@ def main(args):
                 else:
                     data = rec.record(numframes=numframes).flatten()
                 if data.any():   # skip calculations if all data is zero
-                    db = log_band_volumes(data, freqs, num_bars, band_edges, reference_max)
+                    db = log_band_volumes(data, freqs, num_bars, band_edges, reference_max, window, discrete)
                     silence_time = 0
                 else:
                     if silence_time >= max_silence_time:
@@ -422,7 +521,7 @@ def main(args):
                             peak_times[i] = now
 
                 # draw spectrum
-                lines = generate_spectrum(left_lines, right_lines, bar_heights, peak_heights, bar_height, bar_character, peak_character, peaks, box, axes, colors)
+                lines = generate_spectrum_selected(left_lines, right_lines, bar_heights, peak_heights, bar_height, bar_char, half_bar_char, peak_char, peaks, box, axes, colors)
                 tui.draw(lines)
 
     except Exception:
@@ -447,7 +546,7 @@ def argparser():
     """Setup argument parser for CLI"""
     parser = argparse.ArgumentParser(
         prog="spectroterm",
-        description="Curses based terminal spectrum analyzer for currently playing audio",
+        description="Terminal spectrum analyzer for currently playing audio",
     )
     parser._positionals.title = "arguments"
     parser.add_argument(
@@ -486,21 +585,7 @@ def argparser():
         "--peak-hold",
         type=int,
         default=2000,
-        help="time after which peak will dissapear, in ms",
-    )
-    parser.add_argument(
-        "-r",
-        "--bar-character",
-        type=str,
-        default="█",
-        help="character used to draw bars",
-    )
-    parser.add_argument(
-        "-k",
-        "--peak-character",
-        type=str,
-        default="_",
-        help="character used to draw peaks",
+        help="time after which peak will disappear, in ms",
     )
     parser.add_argument(
         "--min-freq",
@@ -527,6 +612,39 @@ def argparser():
         help="maximum loudness on spectrum graph (y-axis)",
     )
     parser.add_argument(
+        "--discrete",
+        action="store_true",
+        help="use discrete interpolation (each sample is a bar) instead default energy interpolation; visible only for low frequencies",
+    )
+    parser.add_argument(
+        "--window",
+        type=str,
+        default=None,
+        help="windowing function; options: none (default), hamming, hann, blackman; useful only when zooming in the x axis, and if there is spectral leakages",
+    )
+    parser.add_argument(
+        "-r",
+        "--bar-character",
+        type=str,
+        default="█",
+        help="character used to draw bars",
+    )
+
+    parser.add_argument(
+        "-e",
+        "--half-bar-character",
+        type=str,
+        default="▄",
+        help="character used to draw half of a bar; set to none to disable; always use bottom half character",
+    )
+    parser.add_argument(
+        "-k",
+        "--peak-character",
+        type=str,
+        default="_",
+        help="character used to draw peaks",
+    )
+    parser.add_argument(
         "--green",
         type=int,
         default=46,
@@ -543,6 +661,11 @@ def argparser():
         type=int,
         default=196,
         help="8bit ANSI color code for red part of bar",
+    )
+    parser.add_argument(
+        "--even-x-axis",
+        action="store_true",
+        help="make x axis points evenly spaced (but x axis is still logarithmic)",
     )
     parser.add_argument(
         "--delay",
@@ -566,7 +689,7 @@ def argparser():
         "--sample-size",
         type=int,
         default=50,
-        help="sample size in ms, higher values will decrease fps",
+        help="sample size in ms, higher values will decrease fps but increase resolution at lower frequencies",
     )
     parser.add_argument(
         "--reference-max",
@@ -588,13 +711,13 @@ def argparser():
         "--pipewire-node-id",
         type=str,
         default=None,
-        help="ID of custom pipewire node to use. Set this to preferred node if spectroterm is launched before any soud is reproduced. Effective only whith --pipewire-fix. Use 'pw-list -o' to get list of available nodes, or use --print-pipewire-node",
+        help="ID of custom pipewire node to use. Set this to preferred node if spectroterm is launched before any sound is reproduced. Effective only whith --pipewire-fix. Use 'pw-list -o' to get list of available nodes, or use --print-pipewire-node",
     )
     parser.add_argument(
         "-v",
         "--version",
         action="version",
-        version="%(prog)s 0.6.2",
+        version="%(prog)s 0.7.0",
     )
     return parser.parse_args()
 

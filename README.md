@@ -1,5 +1,5 @@
 # spectroterm
-Curses based terminal spectrum analyzer for currently playing audio.
+Terminal spectrum analyzer for currently playing audio.
 
 
 ## Features
@@ -13,20 +13,21 @@ Curses based terminal spectrum analyzer for currently playing audio.
 - Custom colors
 - Custom characters
 - Custom fall speed and peak hold
-- Automatic resizing  
+- Automatic resizing
 - Fix for PipeWire switching headset to 'handsfree'
 
 
 ## Usage
 ```
-usage: spectroterm [-h] [-a] [-b] [-c] [-p] [-f FALL_SPEED] [-o PEAK_HOLD] [-r BAR_CHARACTER]
-                   [-k PEAK_CHARACTER] [--min-freq MIN_FREQ] [--max-freq MAX_FREQ]
-                   [--min-db MIN_DB] [--max-db MAX_DB] [--green GREEN] [--orange ORANGE]
-                   [--red RED] [--delay DELAY] [--bt-delay BT_DELAY] [--sample-rate SAMPLE_RATE]
-                   [--sample-size SAMPLE_SIZE] [--reference-max REFERENCE_MAX] [--pipewire-fix]
-                   [--print-pipewire-node] [--pipewire-node-id PIPEWIRE_NODE_ID] [-v]
+usage: spectroterm [-h] [-a] [-b] [-c] [-p] [-f FALL_SPEED] [-o PEAK_HOLD] [--min-freq MIN_FREQ]
+                   [--max-freq MAX_FREQ] [--min-db MIN_DB] [--max-db MAX_DB] [--discrete]
+                   [--window WINDOW] [-r BAR_CHARACTER] [-e HALF_BAR_CHARACTER] [-k PEAK_CHARACTER]
+                   [--green GREEN] [--orange ORANGE] [--red RED] [--even-x-axis] [--delay DELAY]
+                   [--bt-delay BT_DELAY] [--sample-rate SAMPLE_RATE] [--sample-size SAMPLE_SIZE]
+                   [--reference-max REFERENCE_MAX] [--pipewire-fix] [--print-pipewire-node]
+                   [--pipewire-node-id PIPEWIRE_NODE_ID] [-v]
 
-Curses based terminal spectrum analyzer for currently playing audio
+Terminal spectrum analyzer for currently playing audio
 
 options:
   -h, --help            show this help message and exit
@@ -37,36 +38,45 @@ options:
   -f, --fall-speed FALL_SPEED
                         speed at which bars fall in characters per second
   -o, --peak-hold PEAK_HOLD
-                        time after which peak will dissapear, in ms
-  -r, --bar-character BAR_CHARACTER
-                        character used to draw bars
-  -k, --peak-character PEAK_CHARACTER
-                        character used to draw peaks
+                        time after which peak will disappear, in ms
   --min-freq MIN_FREQ   minimum frequency on spectrum graph (x-axis)
   --max-freq MAX_FREQ   maximum frequency on spectrum graph (x-axis)
   --min-db MIN_DB       minimum loudness on spectrum graph (y-axis)
   --max-db MAX_DB       maximum loudness on spectrum graph (y-axis)
+  --discrete            use discrete interpolation (each sample is a bar) instead default energy
+                        interpolation; visible only for low frequencies
+  --window WINDOW       windowing function; options: none (default), hamming, hann, blackman; useful
+                        only when zooming in the x axis, and if there is spectral leakages
+  -r, --bar-character BAR_CHARACTER
+                        character used to draw bars
+  -e, --half-bar-character HALF_BAR_CHARACTER
+                        character used to draw half of a bar; set to none to disable; always use
+                        bottom half character
+  -k, --peak-character PEAK_CHARACTER
+                        character used to draw peaks
   --green GREEN         8bit ANSI color code for green part of bar
   --orange ORANGE       8bit ANSI color code for orange part of bar
   --red RED             8bit ANSI color code for red part of bar
+  --even-x-axis         make x axis points evenly spaced (but x axis is still logarithmic)
   --delay DELAY         spectrogram delay for a better sync with sound.
   --bt-delay BT_DELAY   spectrogram delay for auto-detected bluetooth devices.
   --sample-rate SAMPLE_RATE
                         loopback device sample rate
   --sample-size SAMPLE_SIZE
-                        sample size in ms, higher values will decrease fps
+                        sample size in ms, higher values will decrease fps but increase resolution
+                        at lower frequencies
   --reference-max REFERENCE_MAX
                         value used to tune maximum loudness of sound
-  --pipewire-fix        pipewire only, connect to output with custom loopback device. This
-                        prevents headsets from switching to 'handsfree' mode, which is mono and
-                        has lower audio quality. Sometimes this wont work unless sound is playing
+  --pipewire-fix        pipewire only, connect to output with custom loopback device. This prevents
+                        headsets from switching to 'handsfree' mode, which is mono and has lower
+                        audio quality. Sometimes this wont work unless sound is playing
   --print-pipewire-node
                         will print all currently used pipewire nodes to monitor sound, then exit
   --pipewire-node-id PIPEWIRE_NODE_ID
-                        ID of custom pipewire node to use. Set this to preferred node if
-                        spectroterm is launched before any soud is reproduced. Effective only
-                        whith --pipewire-fix. Use 'pw-list -o' to get list of available nodes, or
-                        use --print-pipewire-node
+                        ID of custom pipewire node to use. Set this to preferred node if spectroterm
+                        is launched before any sound is reproduced. Effective only whith --pipewire-
+                        fix. Use 'pw-list -o' to get list of available nodes, or use --print-
+                        pipewire-node
   -v, --version         show program's version number and exit
 ```
 
@@ -85,7 +95,7 @@ Colors are provided as integer and they are [8bit ANSI color codes](https://gist
 1. Clone this repository
 2. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
 3. `cd spectroterm`
-4. run build script: `uv run build.py`  
+4. run build script: `python build.py`  
 5. To build with Nuitka, add `--nuitka` flag. More optimized, smaller executable, long compile time. See [Nuitka](#nuitka) for more info.  
 
 
@@ -103,4 +113,4 @@ Nuitka requirements:
 ![spectroterm screenshot 01](https://raw.githubusercontent.com/sparklost/spectroterm/refs/heads/main/.github/screenshots/01.png)
 Spectroterm running in tmux:  
 ![spectroterm screenshot 02](https://raw.githubusercontent.com/sparklost/spectroterm/refs/heads/main/.github/screenshots/02.png)  
-(Command: `spectroterm -pc -r ┃ --min-db=-70 --max-db=-20`)
+(Command: `spectroterm -pc -r ┃ -e ╻ --min-db=-70 --max-db=-20`)
