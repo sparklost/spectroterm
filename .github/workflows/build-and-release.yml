@@ -57,7 +57,6 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
-          version: "0.7.14"
           enable-cache: false
 
       - name: Install dependencies with uv
@@ -68,7 +67,7 @@ jobs:
         run: |
             args=()
             [[ "${{ matrix.nuitka }}" == "true" ]] && args+=("--nuitka")
-            [[ "${{ matrix.clang }}" == "true" ]] && args+=("--clang")
+            [[ "${{ matrix.clang }}" != "true" ]] && args+=("--noclang")
             uv run build.py "${args[@]}"
 
       - name: Make binaries executable

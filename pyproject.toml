@@ -1,15 +1,19 @@
 [project]
 name = "spectroterm"
-version = "0.7.0"
+version = "0.7.1"
 description = "Curses based terminal spectrum analyzer for currently playing audio."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "cython>=3.2.4",
-    "nuitka[onefile]>=4.1.0",
     "numpy>=2.4.6",
     "pyfftw>=0.15.1",
-    "pyinstaller>=6.20.0",
     "soundcard>=0.4.6",
     "windows-curses>=2.4.1 ; sys_platform == 'win32'",
+]
+
+[dependency-groups]
+build = [
+    "cython>=3.2.5",
+    "nuitka[onefile]>=4.1.2",
+    "pyinstaller>=6.20.0",
 ]

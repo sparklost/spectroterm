@@ -1,4 +1,5 @@
 import argparse
+import importlib.util
 import os
 import re
 import shutil
@@ -8,6 +9,30 @@ import tomllib
 
 PYTHON_MAX_MINOR = 13
 
+CUSTOM_CFLAGS = [
+    "-DNDEBUG",
+    "-g0",
+    "-O3",
+    "-march=x86-64",
+    "-mtune=generic",
+    "-fno-semantic-interposition",
+    "-fno-strict-overflow",
+    "-fvisibility=hidden",
+    # "-flto=thin",
+]
+CUSTOM_CXXFLAGS = CUSTOM_CFLAGS
+CUSTOM_LDFLAGS = [
+    "-Wl,-s",
+    "-Wl,-O1",
+    "-Wl,--sort-common",
+    "-Wl,--as-needed",
+    "-Wl,-z,pack-relative-relocs",
+    "-Wl,--exclude-libs,ALL",
+    # "-flto=thin",
+]
+CFLAGS_OLD = os.environ.get("CFLAGS", "")
+CXXFLAGS_OLD = os.environ.get("CFLAGS", "")
+LDFLAGS_OLD = os.environ.get("CFLAGS", "")
 
 def get_app_name():
     """Get app name from pyproject.toml"""
@@ -132,6 +157,12 @@ def ensure_python():
     return version
 
 
+def check_dev():
+    """Check if its dev environment and set it up"""
+    if importlib.util.find_spec("PyInstaller") is None or importlib.util.find_spec("nuitka") is None:
+        subprocess.run(["uv", "sync", "--group", "build"], check=True)
+
+
 def find_file_in_venv(lib_name, file_name):
     """Search for file in specified library in current venv"""
     if isinstance(file_name, list):
@@ -209,6 +240,28 @@ def patch_soundcard():
         print(f"Nothing to patch in file {path}")
 
 
+def setup_compiler(clang, clear=False, overwrite=False, cflags=[], ldflags=[], cxxflags=[]):
+    """Set compiler and its flags in environment variables"""
+    if clang:
+        os.environ["CC"] = "clang"
+        os.environ["CXX"] = "clang++"
+        os.environ["LD"] = "lld"
+    if clear:
+        os.environ["CFLAGS"] = CFLAGS_OLD
+        os.environ["CXXFLAGS"] = CXXFLAGS_OLD
+        os.environ["LDFLAGS"] = LDFLAGS_OLD
+        return [], [], []
+    cflags = ([] if overwrite else CFLAGS_OLD.split(" ")) + CUSTOM_CFLAGS + cflags
+    cxxflags = ([] if overwrite else CXXFLAGS_OLD.split(" ")) + CUSTOM_CXXFLAGS + cxxflags
+    ldflags = ([] if overwrite else LDFLAGS_OLD.split(" ")) + CUSTOM_LDFLAGS + ldflags
+    if shutil.which("lld") and clang:
+        ldflags.append("-fuse-ld=lld")
+    os.environ["CFLAGS"] = " ".join(cflags)
+    os.environ["CXXFLAGS"] = " ".join(cxxflags)
+    os.environ["LDFLAGS"] = " ".join(ldflags)
+    return cflags, cxxflags, ldflags
+
+
 def build_numpy_lite(clang):
     """Build numpy without openblass to reduce final binary size"""
     if sys.platform != "linux":
@@ -247,7 +300,9 @@ def build_numpy_lite(clang):
 
 def build_cython(clang, mingw):
     """Build cython extensions"""
+    clang = clang or os.environ.get("CC") == "clang"
     fprint(f"Compiling cython code with {"clang" if clang else "gcc"}{("mingw") if mingw else ""}")
+    setup_compiler(clang)
     cmd = ["uv", "run", "python", "setup.py", "build_ext", "--inplace"]
     if clang:
         os.environ["CC"] = "clang"
@@ -323,11 +378,13 @@ def build_with_pyinstaller(onedir):
     fprint(f"Finished building {pkgname}")
 
 
-def build_with_nuitka(onedir, clang, mingw):
+def build_with_nuitka(onedir, clang, mingw, print_cmd=False):
     """Build with nuitka"""
+    clang = clang or os.environ.get("CC") == "clang"
     pkgname = get_app_name()
 
-    build_numpy_lite(clang)
+    if not print_cmd:
+        build_numpy_lite(clang)
 
     mode = "--standalone" if onedir else "--onefile"
     compiler = ""
@@ -340,6 +397,12 @@ def build_with_nuitka(onedir, clang, mingw):
     exclude_imports = ["--nofollow-import-to=cython"]
     package_data = ["--include-package-data=soundcard"]
 
+    cflags, _, ldflags = setup_compiler(
+        clang,
+        cflags=(["-flto=thin"]) if clang else [],
+        ldflags=(["-flto=thin"]) if clang else [],
+    )
+
     # options
     if clang:
         os.environ["CFLAGS"] = "-Wno-macro-redefined"
@@ -347,7 +410,7 @@ def build_with_nuitka(onedir, clang, mingw):
     # platform-specific
     if sys.platform == "linux":
         options = []
-    elif sys.platform == "win32":
+    elif sys.platform == "win32" and not print_cmd:
         patch_soundcard()
         options = ["--assume-yes-for-downloads"]
     elif sys.platform == "darwin":
@@ -374,6 +437,9 @@ def build_with_nuitka(onedir, clang, mingw):
         "main.py",
     ]
     cmd = [arg for arg in cmd if arg != ""]
+    if print_cmd:
+        print(" ".join(cmd))
+        sys.exit(0)
     fprint("Starting nuitka")
     try:
         subprocess.run(cmd, check=True)
@@ -404,9 +470,9 @@ def parser():
         help="build with nuitka, takes a long time, but more optimized executable",
     )
     parser.add_argument(
-        "--clang",
+        "--noclang",
         action="store_true",
-        help="use clang when building with nuitka",
+        help="script prefers clang if its installed, set this to not use it, or change CC and LD env vars",
     )
     parser.add_argument(
         "--onedir",
@@ -421,15 +487,31 @@ def parser():
     parser.add_argument(
         "--mingw",
         action="store_true",
-        help="use mingw instead msvc on windows, has no effect on Linux and macOS, or with --clang flag",
+        help="use mingw instead msvc on windows, has no effect on Linux and macOS",
+    )
+    parser.add_argument(
+        "--nobuild",
+        action="store_true",
+        help="only configure environment, but dont build endcord",
+    )
+    parser.add_argument(
+        "--print-cmd",
+        action="store_true",
+        help="print build command for nuitka or pyinstaller and exit",
     )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parser()
-    if sys.platform not in ("linux", "win32", "darwin"):
-        sys.exit(f"This platform is not supported: {sys.platform}")
+    clang = not (args.noclang or args.mingw)
+
+    if args.print_cmd:
+        if args.nuitka:
+            build_with_nuitka(args.onedir, clang, args.mingw, args.nosoundcard, print_cmd=True)
+        else:
+            build_with_pyinstaller(args.onedir, args.nosoundcard, print_cmd=True)
+        sys.exit(0)
 
     if check_python():
         version = ensure_python()
@@ -439,14 +521,22 @@ if __name__ == "__main__":
             os.execvp("uv", ["uv", "run", *sys.argv])
         sys.exit(0)
 
+    if args.nobuild:
+        sys.exit(0)
+
+    if sys.platform not in ("linux", "win32", "darwin"):
+        print(f"This platform is not supported: {sys.platform}", file=sys.stderr)
+        sys.exit(1)
+
+    check_dev()
     if not args.nocython:
         try:
-            build_cython(args.clang, args.mingw)
+            build_cython(clang, args.mingw)
         except Exception as e:
             print(f"Failed building cython extensions, error: {e}")
     if args.nuitka:
-        build_with_nuitka(args.onedir, args.clang, args.mingw)
-        sys.exit()
+        build_with_nuitka(args.onedir, clang, args.mingw)
     else:
         build_with_pyinstaller(args.onedir)
-        sys.exit()
+
+    sys.exit(0)
