@@ -88,7 +88,7 @@ Colors are provided as integer and they are [8bit ANSI color codes](https://gist
 - Pre-built binaries are available in releases
 - From AUR: `yay -S spectroterm`
 - Build, then copy built executable to system:  
-`sudo cp dist/spectroterm /usr/local/sbin/`
+`sudo cp dist/spectroterm /usr/local/bin/`
 
 
 ## Building
