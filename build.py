@@ -397,11 +397,7 @@ def build_with_nuitka(onedir, clang, mingw, print_cmd=False):
     exclude_imports = ["--nofollow-import-to=cython"]
     package_data = ["--include-package-data=soundcard"]
 
-    cflags, _, ldflags = setup_compiler(
-        clang,
-        cflags=(["-flto=thin"]) if clang else [],
-        ldflags=(["-flto=thin"]) if clang else [],
-    )
+    setup_compiler(clang)
 
     # options
     if clang:
