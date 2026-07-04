@@ -34,6 +34,7 @@ CFLAGS_OLD = os.environ.get("CFLAGS", "")
 CXXFLAGS_OLD = os.environ.get("CFLAGS", "")
 LDFLAGS_OLD = os.environ.get("CFLAGS", "")
 
+
 def get_app_name():
     """Get app name from pyproject.toml"""
     if os.path.exists("pyproject.toml"):
@@ -102,12 +103,12 @@ PKGVER = get_version_number()
 USE_COLOR = supports_color()
 
 
-def fprint(text, color_code="\033[1;35m", prepend=f"[{PKGNAME.capitalize()} Build Script]: "):
-    """Print colored text prepended with text, default is light purple"""
+def fprint(text, color_code="\033[1;35m", prefix=f"[{PKGNAME.capitalize()} Build Script]: "):
+    """Print colored text prefixed with text, default is light purple"""
     if USE_COLOR:
-        print(f"{color_code}{prepend}{text}\033[0m")
+        print(f"{color_code}{prefix}{text}\033[0m")
     else:
-        print(f"{prepend}{text}")
+        print(f"{prefix}{text}")
 
 
 def check_python():
